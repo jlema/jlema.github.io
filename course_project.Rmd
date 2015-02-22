@@ -1,0 +1,76 @@
+---
+title: "Practical Machine Learning - Prediction Assignment Writeup"
+output: html_document
+self_contained: FALSE
+keep_md: TRUE
+---
+
+
+```{r cache=TRUE}
+library(caret)
+library(randomForest)
+library(rattle)
+#Function for converting data types of multiple columns
+#From http://stackoverflow.com/questions/11261399/function-for-converting-dataframe-column-type
+convert.magic <- function(obj, type, cols) {
+    FUN1 <- switch(type, character = as.character, numeric = as.numeric, factor = as.factor)
+    obj[,cols] <- lapply(obj[,cols], FUN1) 
+    as.data.frame(obj)
+}
+#Download data. This may take a little while (about 35 seconds on my laptop.)
+if (!file.exists("pml-training.csv")) {
+    download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                  destfile="pml-training.csv")
+}
+if (!file.exists("pml-testing.csv")) {
+    download.file(url="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                  destfile="pml-testing.csv")
+}
+#round(prop.table(table(trainingRaw$user_name, trainingRaw$classe), 1), 2)
+#Load data and convert all blanks, spaces, string NAs and #DIV/0! to a true NA values
+trainingRaw <- read.csv("pml-training.csv", header=TRUE, na.strings = c("", " ", "NA", "#DIV/0!"))
+testingRaw <- read.csv("pml-testing.csv", header=TRUE, na.strings = c("", " ","NA", "#DIV/0!"))
+# Remove columns with more than 500 NA values
+trainingClean <- trainingRaw[!colSums(is.na(trainingRaw)) > 500]
+# Filter rows to only those that have new_window == "no"
+trainingClean <- subset(trainingClean, subset = (new_window == "no"))
+# Remove metadata columns
+trainingClean <- trainingClean[,-(1:7),drop=FALSE]
+# Change all data types to numeric (with the exception of classe)
+trainingClean <- convert.magic(trainingClean,type = "numeric",c(1:52))
+# Split clean raw training set into training and testing sets based on classe
+trainIndex = createDataPartition(trainingClean$classe, p = 0.70, list=FALSE)
+trainingClean.training = trainingClean[trainIndex,]
+trainingClean.testing = trainingClean[-trainIndex,]
+# Set a seed for reproducibility
+set.seed(123654)
+# Let's try a decision tree algorithm to see how well it does
+modFit.rpart <- train(classe ~., method = "rpart", data = trainingClean.training)
+# Show decision tree on a fancy format
+fancyRpartPlot(modFit.rpart$finalModel)
+# Use the decisision tree model to predict classe for the clean raw testing set
+pred.rpart <- as.vector(predict(modFit.rpart, trainingClean.testing))
+# Must be pretty bad as it never predicts any classe = "D"
+# Let's check accuraccy for the decision tree model
+pred.rpart.correct <- sum(pred.rpart==trainingClean.testing$classe)
+pred.rpart.accuracy <- pred.rpart.correct / nrow(trainingClean.testing)
+# About 49.5% (i.e. pretty much the same as a coin flip)
+
+# Let's try a random forest algorithm for our first prediction model
+modFit.rf <- randomForest(classe ~ ., data = trainingClean.training)
+# Use the randomForest model to predict classe for the clean raw testing set
+pred.rf <- as.vector(predict(modFit.rf, trainingClean.testing))
+# Get the confusion matrix to see how accurate is our prediction
+confusionMatrix(pred.rf, trainingClean.testing$classe)[c("table","overall")]
+
+# Let's then try a boosting algorithm to see if it does better than the random forest
+modFit.gbm <- train(classe ~ ., method = "gbm", data = trainingClean.training, verbose = FALSE)
+# Use the boosting model to predict classe for the clean raw testing set
+pred.gbm <- as.vector(predict(modFit.rf, trainingClean.testing))
+# Get the confusion matrix to see how accurate is our prediction
+confusionMatrix(pred.gbm, trainingClean.testing$classe)[c("table","overall")]
+
+#qplot(pred.gbm, classe, data = trainingClean.testing, col = classe, position=position_jitter(w=0.05,h=0.05))
+#he num_window and "X" variables in particular are not appropriate to include. The test subjects seem to run through their different exercise techniques sequentially. If you graph num_window and vs. Class you will see the cyclic correlation. So, if you use num_window to predict, you may "overfit", However, I don't mean that your predictions on the test data will suffer (they may actually get better) - but you will not be predicting the "classe" using the measurements of the device - you will be predicting based on when and in what sequence the exercise was performed
+answers <- as.vector(predict(modFit.rf, testingRaw))
+```
